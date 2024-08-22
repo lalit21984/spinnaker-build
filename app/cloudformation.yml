@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Sample Template for PACT Simple-CloudFormation
+Transform: 'AWS::Serverless-2016-10-31' # Remove if not using a serverless function
+
+Parameters:
+  pProduct:
+    Description: Name of the instance
+    Type: String
+  pEnvironment:
+    Description: Environment Name
+    Type: String
+
+Resources:
+  rSMSParamter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Description: Sample Parameter Published by PACT Simple-CloudFormation
+      Name: !Sub ${pProduct}-TestParameter
+      Type: String
+      Value: !Sub |
+        {"Environment":"${pEnvironment}"}

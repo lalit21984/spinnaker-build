@@ -1,0 +1,594 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Builds a CI/CD Pipeline to deploy a configurable CloudFormation or SAM Stack.
+
+Parameters:
+# Product Parameters
+  pProduct:
+    Type: String
+    Description: Product Name
+    Default: ""
+  pTeam:
+    Type: String
+    Description: Team Name
+    Default: ""
+
+### Pipeline Configuration: 
+
+  pBranchName:
+    Type: String
+    Description: Branch Name to Deploy
+    Default: main  
+
+# Deploy Targets: Dev / Test / PreProd / Prod
+  pDeployIntoDepl: # Deploy Target: Depl
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Deploy into the Depl account
+  pDeployIntoDev: # Deploy Target: Dev
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Deploy into the Dev account
+  pDeployIntoTest: # Deploy Target: Test
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Deploy into the Test account
+  pDeployIntoPreProd: # Deploy Target: PreProd
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Deploy into the PreProd account
+  pDeployIntoProd: # Deploy Target: Prod
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Deploy into the Prod account
+
+# Approvals Before: Test / PreProd / Prod
+  pApprovalIntoTest: # Require Approval before Test
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: Require Approval before Test
+  pApprovalIntoPreProd: # Require Approval before PreProd
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Require Approval before PreProd
+  pApprovalIntoProd: # Require Approval before Prod
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'Yes'
+    Description: Require Approval before Prod
+
+# Template Path: 
+  pTemplatePath: 
+    Type: String
+    Default: 'app/cloudformation.yml'
+    Description: Path to the template to deploy from the source or build artifact
+
+# Optional Configuration File for Dev
+  pConfigurationPathDev: 
+    Type: String
+    Default: 'app/config/configuration-dev.json'
+    Description: (Optional) CloudFormation Configuration file for Dev
+# Optional Configuration File for Test
+  pConfigurationPathTest: 
+    Type: String
+    Default: 'app/config/configuration-test.json'
+    Description: (Optional) CloudFormation Configuration file for Test
+# Optional Configuration File for PreProd
+  pConfigurationPathPreProd: 
+    Type: String
+    Default: 'app/config/configuration-preprod.json'
+    Description: (Optional) CloudFormation Configuration file for PreProd
+# Optional Configuration File for Prod
+  pConfigurationPathProd: 
+    Type: String
+    Default: 'app/config/configuration-prod.json'
+    Description: (Optional) CloudFormation Configuration file for Prod
+
+# Build Project: Yes / No
+  pUseCodeBuildProject: 
+    Type: String
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Default: 'No'
+    Description: Create a CodeBuild project, a build action, and use build artifacts
+# Buildspec Path:
+  pBuildspecPath: 
+    Type: String
+    Default: 'cicd/buildspec.yml'
+    Description: Path to the buildspec file for the (optional) CodeBuild project 
+
+### SSM Parameters
+  pSharedProdAccountNumber:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/accounts/SharedServices/Prod/id'
+  pDevAccountNumber:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/accounts/dev/id'
+  pTestAccountNumber:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/accounts/test/id'
+  pPreProdAccountNumber:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: '/accounts/preprod/id'
+  pProdAccountNumber:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/accounts/prod/id'
+  pDeplAccountNumber:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/accounts/depl/id'
+  pRegion1Name:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/pipelinefactory/codepipeline/region1/name'
+  pRegion1CodePipelineKmsKey:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/pipelinefactory/codepipeline/region1/kmskeyarn'
+  pRegion1CodePipelineArtifactBucket:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/pipelinefactory/codepipeline/region1/s3bucket'
+  pCodePipelineServiceRole:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/pipelinefactory/codepipeline/iam/service'
+  pCodePipelineActionRole:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/pipelinefactory/codepipeline/iam/action'
+  pCodeBuildRole:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: '/pipelinefactory/codebuild/iam'
+
+Conditions:
+  cDeployToDepl: !And
+    - !Not [ !Equals  [!Ref pDeplAccountNumber, 'null']]
+    - !Equals [!Ref pDeployIntoDepl, 'Yes' ]
+  cDeployToDev: !And
+    - !Not [ !Equals  [!Ref pDevAccountNumber, 'null']]
+    - !Equals [!Ref pDeployIntoDev, 'Yes' ]
+  cDeployToTest: !And
+    - !Not [ !Equals  [!Ref pTestAccountNumber, 'null']]
+    - !Equals [!Ref pDeployIntoTest, 'Yes' ]
+  cDeployToPreProd: !And
+    - !Not [ !Equals  [!Ref pPreProdAccountNumber, 'null']]
+    - !Equals [!Ref pDeployIntoPreProd, 'Yes' ]
+  cDeployToProd: !And
+    - !Not [ !Equals  [!Ref pProdAccountNumber, 'null']]
+    - !Equals [!Ref pDeployIntoProd, 'Yes' ]
+  cApprovalIntoTest: !And
+    - Condition: cDeployToTest
+    - !Equals [!Ref pApprovalIntoTest, 'Yes' ]
+  cApprovalIntoPreProd: !And
+    - Condition: cDeployToPreProd
+    - !Equals [!Ref pApprovalIntoPreProd, 'Yes' ]
+  cApprovalIntoProd: !And
+    - Condition: cDeployToProd
+    - !Equals [!Ref pApprovalIntoProd, 'Yes' ]
+  cUseConfigurationDev: !Not [ !Equals [!Ref pConfigurationPathDev, '' ]]
+  cUseConfigurationDepl: !Not [ !Equals [!Ref pConfigurationPathDev, '' ]]
+  cUseConfigurationTest: !Not [ !Equals [!Ref pConfigurationPathTest, '' ]]
+  cUseConfigurationPreProd: !Not [ !Equals [!Ref pConfigurationPathPreProd, '' ]]
+  cUseConfigurationProd: !Not [ !Equals [!Ref pConfigurationPathProd, '' ]]
+  cUseCodeBuildProject: !Equals [!Ref pUseCodeBuildProject, 'Yes' ]
+
+Resources:
+    # ------------
+  # CodeBuild
+  # ------------
+  rCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Condition: cUseCodeBuildProject
+    Properties:
+      Name: !Sub ${pProduct}-${pTeam}-CI-dev
+      Description: This project will be used for Continuous Integration
+      ServiceRole: !Ref pCodeBuildRole
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: TEMPLATE_BUCKET
+            Value: !Ref pRegion1CodePipelineArtifactBucket
+          - Name: TEMPLATE_PREFIX
+            Value: codebuild
+          - Name: KMS_ARN
+            Value: !Ref pRegion1CodePipelineKmsKey
+          - Name: TEMPLATE_PATH
+            Value: !Ref pTemplatePath
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pBuildspecPath
+      TimeoutInMinutes: 10
+      EncryptionKey: !Ref pRegion1CodePipelineKmsKey
+
+  # --------------
+  # CodePipeline
+  # --------------
+  rCodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RestartExecutionOnUpdate: True
+      ArtifactStores:
+        - Region: !Ref pRegion1Name
+          ArtifactStore:
+            EncryptionKey:
+              Id: !Ref pRegion1CodePipelineKmsKey
+              Type: KMS
+            Location: !Ref pRegion1CodePipelineArtifactBucket
+            Type: S3
+      Name: !Sub ${pProduct}-${pTeam}-dev
+      RoleArn: !Sub arn:aws:iam::${pDeplAccountNumber}:role/${pCodePipelineServiceRole}
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: TemplateSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: "1"
+              Configuration:
+                BranchName: !Ref pBranchName
+                RepositoryName: !Ref pProduct
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: Source
+              RunOrder: 1
+        - Name: BuildAndPackage
+          Actions:
+            - Name: Update-CodePipeline
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Provider: Lambda
+                Version: "1"
+              Configuration:
+                FunctionName: ScanUpdateCodePipeline
+                UserParameters: |
+                  {
+                    "cfn_template": "cicd/codepipeline.yml",
+                    "cfn_parameter": "cicd/pipeline_parameters.json"
+                  }
+              InputArtifacts:
+                - Name: Source
+              RoleArn: !Sub arn:aws:iam::${pSharedProdAccountNumber}:role/Shared-Lambda-Action
+              RunOrder: 1
+            - !If #cUseCodeBuildProject
+                - cUseCodeBuildProject
+                - Name: CodeBuild_Project
+                  ActionTypeId:
+                    Category: Build
+                    Owner: AWS
+                    Provider: CodeBuild
+                    Version: "1"
+                  Configuration:
+                    ProjectName: !Ref rCodeBuildProject
+                  InputArtifacts:
+                    - Name: Source
+                  OutputArtifacts:
+                    - Name: Build
+                  RunOrder: 2                  
+                - !Ref AWS::NoValue
+            - Name: Get_Pipeline_Artifacts
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Provider: Lambda
+                Version: "1"
+              Configuration:
+                FunctionName: GetPipelineArtifacts
+                UserParameters: !Sub |
+                  {
+                    "dest_account": "${pDeplAccountNumber}"
+                  }
+              InputArtifacts:
+                - Name: Source
+              RoleArn: !Sub arn:aws:iam::${pSharedProdAccountNumber}:role/Shared-Lambda-Action
+        - !If # Deployment into Depl
+          - cDeployToDepl
+          - Name: !Sub ${pTeam}-Depl
+            Actions:
+              - Name: Depl_DeployCodeBuild
+                ActionTypeId:
+                  Category: Deploy
+                  Owner: AWS
+                  Provider: CloudFormation
+                  Version: "1"
+                Configuration:
+                  ActionMode: CREATE_UPDATE
+                  Capabilities: CAPABILITY_NAMED_IAM
+                  RoleArn: !Sub arn:aws:iam::${pDeplAccountNumber}:role/${pCodePipelineActionRole}
+                  StackName: !Sub ${pProduct}-Build
+                  ParameterOverrides: !Sub |
+                    {
+                      "pEnvironment": "Depl",
+                      "pProxyHost": "proxy-nonprod.company.com",
+                      "pProduct": "${pProduct}"
+                    }
+                  TemplatePath: Source::app/codebuild-project.yml
+                  TemplateConfiguration: !If
+                    - cUseConfigurationDepl
+                    - !If
+                      - cUseCodeBuildProject
+                      - !Sub Build::${pConfigurationPathDev}
+                      - !Sub Source::${pConfigurationPathDev}
+                    - !Ref AWS::NoValue
+                InputArtifacts: !If
+                  - cUseCodeBuildProject # Include Build Artifact if using a build project
+                  - - Name: Source
+                    - Name: Build
+                  - - Name: Source
+                RoleArn: !Sub arn:aws:iam::${pDeplAccountNumber}:role/${pCodePipelineActionRole}
+                RunOrder: 1
+              - Name: CodeBuild_Project
+                ActionTypeId:
+                  Category: Build
+                  Owner: AWS
+                  Provider: CodeBuild
+                  Version: "1"
+                Configuration:
+                  ProjectName: !Sub ${pProduct}-Project
+                InputArtifacts:
+                  - Name: Source
+                OutputArtifacts:
+                  - Name: DeplBuild
+                RoleArn: !Sub arn:aws:iam::${pDeplAccountNumber}:role/${pCodePipelineActionRole}
+                RunOrder: 2
+          - !Ref AWS::NoValue
+        # - !If # Approval before deployment into Test
+        #   - cApprovalIntoTest 
+        #   - Name: !Sub ${pTeam}-Test_Approval
+        #     Actions:
+        #       - Name: TestApproval
+        #         ActionTypeId:
+        #           Category: Approval
+        #           Owner: AWS
+        #           Provider: Manual
+        #           Version: "1"
+        #         Configuration:
+        #           NotificationArn: !Sub arn:aws:sns:${pRegion1Name}:${pSharedProdAccountNumber}:DeliveryPipelineManualApproval
+        #           CustomData: !Sub |
+        #             {
+        #               "PipelineAccount": ${pDeplAccountNumber}
+        #             }
+        #         RoleArn: !Sub arn:aws:iam::${pSharedProdAccountNumber}:role/Shared-Lambda-Action
+        #         RunOrder: 1
+        #   - !Ref AWS::NoValue
+        # - !If # Deployment into Test
+        #   - cDeployToTest
+        #   - Name: !Sub ${pTeam}-Test
+        #     Actions:
+        #       - Name: Test_DeployCodeBuild
+        #         ActionTypeId:
+        #           Category: Deploy
+        #           Owner: AWS
+        #           Provider: CloudFormation
+        #           Version: "1"
+        #         Configuration:
+        #           ActionMode: CREATE_UPDATE
+        #           Capabilities: CAPABILITY_NAMED_IAM
+        #           RoleArn: !Sub arn:aws:iam::${pTestAccountNumber}:role/${pCodePipelineActionRole}
+        #           StackName: !Sub ${pProduct}-Build
+        #           ParameterOverrides: !Sub |
+        #             {
+        #               "pEnvironment": "Test",
+        #               "pProxyHost": "proxy-nonprod.company.com",
+        #               "pProduct": "${pProduct}"
+        #             }
+        #           TemplatePath: Source::app/codebuild-project.yml
+        #           TemplateConfiguration: !If
+        #             - cUseConfigurationTest
+        #             - !If
+        #               - cUseCodeBuildProject
+        #               - !Sub Build::${pConfigurationPathTest}
+        #               - !Sub Source::${pConfigurationPathTest}
+        #             - !Ref AWS::NoValue
+        #         InputArtifacts: !If
+        #           - cUseCodeBuildProject # Include Build Artifact if using a build project
+        #           - - Name: Source
+        #             - Name: Build
+        #           - - Name: Source
+        #         RoleArn: !Sub arn:aws:iam::${pTestAccountNumber}:role/${pCodePipelineActionRole}
+        #         RunOrder: 1
+        #       - Name: CodeBuild_Project
+        #         ActionTypeId:
+        #           Category: Build
+        #           Owner: AWS
+        #           Provider: CodeBuild
+        #           Version: "1"
+        #         Configuration:
+        #           ProjectName: !Sub ${pProduct}-Project
+        #         InputArtifacts:
+        #           - Name: Source
+        #         OutputArtifacts:
+        #           - Name: TestBuild
+        #         RoleArn: !Sub arn:aws:iam::${pTestAccountNumber}:role/${pCodePipelineActionRole}
+        #         RunOrder: 2
+        #   - !Ref AWS::NoValue
+        # - !If # Approval before deployment into PreProd
+        #   - cApprovalIntoPreProd 
+        #   - Name: !Sub ${pTeam}-PreProd_Approval
+        #     Actions:
+        #       - Name: PreProdApproval
+        #         ActionTypeId:
+        #           Category: Approval
+        #           Owner: AWS
+        #           Provider: Manual
+        #           Version: "1"
+        #         Configuration:
+        #           NotificationArn: !Sub arn:aws:sns:${pRegion1Name}:${pSharedProdAccountNumber}:DeliveryPipelineManualApproval
+        #           CustomData: !Sub |
+        #             {
+        #               "PipelineAccount": ${pDeplAccountNumber}
+        #             }
+        #         RoleArn: !Sub arn:aws:iam::${pSharedProdAccountNumber}:role/Shared-Lambda-Action
+        #         RunOrder: 1
+        #   - !Ref AWS::NoValue
+        # - !If # Deployment into PreProd
+        #   - cDeployToPreProd
+        #   - Name: !Sub ${pTeam}-PreProd
+        #     Actions:
+        #       - Name: PreProd_DeployCodeBuild
+        #         ActionTypeId:
+        #           Category: Deploy
+        #           Owner: AWS
+        #           Provider: CloudFormation
+        #           Version: "1"
+        #         Configuration:
+        #           ActionMode: CREATE_UPDATE
+        #           Capabilities: CAPABILITY_NAMED_IAM
+        #           RoleArn: !Sub arn:aws:iam::${pPreProdAccountNumber}:role/${pCodePipelineActionRole}
+        #           StackName: !Sub ${pProduct}-Build
+        #           ParameterOverrides: !Sub |
+        #             {
+        #               "pEnvironment": "PreProd",
+        #               "pProduct": "${pProduct}"
+        #             }
+        #           TemplatePath: Source::app/codebuild-project.yml
+        #           TemplateConfiguration: !If
+        #             - cUseConfigurationPreProd
+        #             - !If
+        #               - cUseCodeBuildProject
+        #               - !Sub Build::${pConfigurationPathPreProd}
+        #               - !Sub Source::${pConfigurationPathPreProd}
+        #             - !Ref AWS::NoValue
+        #         InputArtifacts: !If
+        #           - cUseCodeBuildProject # Include Build Artifact if using a build project
+        #           - - Name: Source
+        #             - Name: Build
+        #           - - Name: Source
+        #         RoleArn: !Sub arn:aws:iam::${pPreProdAccountNumber}:role/${pCodePipelineActionRole}
+        #         RunOrder: 1
+        #       - Name: CodeBuild_Project
+        #         ActionTypeId:
+        #           Category: Build
+        #           Owner: AWS
+        #           Provider: CodeBuild
+        #           Version: "1"
+        #         Configuration:
+        #           ProjectName: !Sub ${pProduct}-Project
+        #         InputArtifacts:
+        #           - Name: Source
+        #         OutputArtifacts:
+        #           - Name: PreProdBuild
+        #         RoleArn: !Sub arn:aws:iam::${pPreProdAccountNumber}:role/${pCodePipelineActionRole}
+        #         RunOrder: 2
+        #   - !Ref AWS::NoValue
+        # - !If # Approval before deployment into Prod
+        #   - cApprovalIntoProd 
+        #   - Name: !Sub ${pTeam}-Prod_Approval
+        #     Actions:
+        #       - Name: ProdApproval
+        #         ActionTypeId:
+        #           Category: Approval
+        #           Owner: AWS
+        #           Provider: Manual
+        #           Version: "1"
+        #         Configuration:
+        #           NotificationArn: !Sub arn:aws:sns:${pRegion1Name}:${pSharedProdAccountNumber}:DeliveryPipelineManualApproval
+        #           CustomData: !Sub |
+        #             {
+        #               "PipelineAccount": ${pDeplAccountNumber}
+        #             }
+        #         RoleArn: !Sub arn:aws:iam::${pSharedProdAccountNumber}:role/Shared-Lambda-Action
+        #         RunOrder: 1
+        #   - !Ref AWS::NoValue
+        # - !If # Deployment into Prod
+        #   - cDeployToProd
+        #   - Name: !Sub ${pTeam}-Prod
+        #     Actions:
+        #       - Name: Prod_DeployCodeBuild
+        #         ActionTypeId:
+        #           Category: Deploy
+        #           Owner: AWS
+        #           Provider: CloudFormation
+        #           Version: "1"
+        #         Configuration:
+        #           ActionMode: CREATE_UPDATE
+        #           Capabilities: CAPABILITY_NAMED_IAM
+        #           RoleArn: !Sub arn:aws:iam::${pProdAccountNumber}:role/${pCodePipelineActionRole}
+        #           StackName: !Sub ${pProduct}-Build
+        #           ParameterOverrides: !Sub |
+        #             {
+        #               "pEnvironment": "Prod",
+        #               "pProduct": "${pProduct}"
+        #             }
+        #           TemplatePath: Source::app/codebuild-project.yml
+        #           TemplateConfiguration: !If
+        #             - cUseConfigurationProd
+        #             - !If
+        #               - cUseCodeBuildProject
+        #               - !Sub Build::${pConfigurationPathProd}
+        #               - !Sub Source::${pConfigurationPathProd}
+        #             - !Ref AWS::NoValue
+        #         InputArtifacts: !If
+        #           - cUseCodeBuildProject # Include Build Artifact if using a build project
+        #           - - Name: Source
+        #             - Name: Build
+        #           - - Name: Source
+        #         RoleArn: !Sub arn:aws:iam::${pProdAccountNumber}:role/${pCodePipelineActionRole}
+        #         RunOrder: 1
+        #       - Name: CodeBuild_Project
+        #         ActionTypeId:
+        #           Category: Build
+        #           Owner: AWS
+        #           Provider: CodeBuild
+        #           Version: "1"
+        #         Configuration:
+        #           ProjectName: !Sub ${pProduct}-Project
+        #         InputArtifacts:
+        #           - Name: Source
+        #         OutputArtifacts:
+        #           - Name: ProdBuild
+        #         RoleArn: !Sub arn:aws:iam::${pProdAccountNumber}:role/${pCodePipelineActionRole}
+        #         RunOrder: 2
+        #   - !Ref AWS::NoValue
+
+  # -------------------------------------------
+  # CloudWatch Event
+  # -------------------------------------------
+  rInitiatePipelineEvent:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: 'Amazon CloudWatch Events rule to automatically start your pipeline when a change occurs to a CodeCommit Repository'
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - "CodeCommit Repository State Change"
+        resources:
+          - !Sub arn:aws:codecommit:${pRegion1Name}:${AWS::AccountId}:${pProduct}
+        detail:
+          referenceType:
+            - branch
+          referenceName:
+            #- !Ref pBranchName
+            - dev
+      Name: !Sub ${pProduct}-${pTeam}-f-dev
+      State: "ENABLED"
+      Targets:
+        - RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/CodePipeline-Service
+          Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${rCodePipeline}
+          Id: !Sub "${pProduct}_Initial_CodePipeline_V1"   

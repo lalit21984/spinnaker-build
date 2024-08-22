@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CodeBuild Project for environment accounts to configure and deploy EKS Pattern
+
+Parameters:
+  pProduct:
+    Type: String
+
+  pEnvironment:
+    Type: String
+    # Proxy Host
+  pProxyHost:
+    Description: Proxy Host Name
+    Type: String
+
+  pS3Bucket:
+    Type: String  
+  
+  pHelmChartRepoName:
+    Type: String
+
+  pChartVersion:
+    Type: String  
+
+Resources:
+    # ------------
+  # CodeBuild
+  # ------------
+  rCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pProduct}-Project
+      Description: CodeBuild Project for environment accounts to configure and deploy Spinnaker
+      ServiceRole: !Sub arn:aws:iam::${AWS::AccountId}:role/CodePipeline-Action
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        PrivilegedMode: false
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: bash
+            #parameter-store:
+             # S3Bucket: /sharedservices/helm/s3bucket
+          #   shell: bash
+          #   # parameter-store:
+          #   #   SPOT_CONTROLLER_TOKEN: /sharedservices/${AWS::Region}/spotinst/controller-token
+          #   #   SPOT_ACCOUNT_ID: /sharedservices/${AWS::Region}/spotinst/account-id
+          #   #   SPLUNK_ACCESS_TOKEN: /sharedservices/${AWS::Region}/splunk/access-token
+          #   #   SYSDIG_ACCESS_KEY: /sharedservices/${AWS::Region}/sysdig/access-key
+          #   #   CONFLUENT_LICENSE_KEY: /sharedservices/${AWS::Region}/sysdig/confluent-license-key
+          #   variables:
+          #     http_proxy: http://${pProxyHost}:8080
+          #     https_proxy: http://${pProxyHost}:8080
+          #     HTTP_PROXY: http://${pProxyHost}:8080
+          #     HTTPS_PROXY: http://${pProxyHost}:8080
+          #     no_proxy: '169.254.169.254,169.0.5.2,127.0.0.1/8,172.16.0.0/12,,.abc.com,.abc.com,.abc.com,.eks.amazonaws.com,.dkr.ecr.${AWS::Region}.amazonaws.com,sts.${AWS::Region}.amazonaws.com,cloudformation.${AWS::Region}.amazonaws.com'
+          #   exported-variables:
+          #     - http_proxy
+          #     - https_proxy
+          #     - HTTP_PROXY
+          #     - HTTPS_PROXY
+          #     - no_proxy
+          phases:
+            install:
+              runtime-versions:
+                java: corretto11
+              commands:
+                # - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                # - unzip awscliv2.zip
+                # - sudo ./aws/install --update
+                - echo Download and install Helm
+                - curl -o helm-v3.13.0-rc.1-linux-386.tar.gz https://get.helm.sh/helm-v3.13.0-rc.1-linux-386.tar.gz
+                - tar -zxvf helm-v3.13.0-rc.1-linux-386.tar.gz
+                - mv linux-386/helm /usr/local/bin/helm
+                # - curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 > get_helm.sh
+                # - chmod 700 get_helm.sh
+                # - bash ./get_helm.sh
+                - helm plugin install https://github.com/hypnoglow/helm-s3.git --version master
+                - pip install git-remote-codecommit
+                - git clone codecommit::us-east-1://ap-app-spinnaker-deployment
+            build:
+              run-as: root
+              commands:
+                #- export ENV="${pEnvironment}"
+                - helm s3 init --ignore-if-exists s3://ap-app-cluster-spinnaker-us-east-1/charts || true
+                - helm repo add my-charts s3://ap-app-cluster-spinnaker-us-east-1/charts
+                #- cd app/helm/stable
+                - cd ap-app-spinnaker-deployment/
+                # - ls -ltr
+                #- applist=$(git diff --name-only -- app/helm/stable)
+                # - |
+                #   for eachapp in ${applist[@]}; do
+                #     helmrepolist=`echo $eachapp | awk -F"/" '{print $4}'`
+                #     helmchart=$(echo $helmrepolist | sort -u)
+                #       if [ $app = castervrtreference ]; then
+                #         cd app/helm/stable/castervrtreference/scripts
+                #         bash ./deploy.sh
+                #         cd ../../
+                #       else
+                #         cd app/helm/stable
+                #       fi
+                #   done
+                - |
+                  chartlist=()
+                  applist=$(git diff --name-only HEAD~1 -- app/helm/stable)
+                  echo ${applist[@]}
+                  for chart in ${applist[@]}; do
+                    folder=`echo $chart | awk -F"/" '{print $4}'`
+                    chartlist+=("$folder")
+                  done
+                  echo ${chartlist[@]}
+                  chartlists=($(echo "${chartlist[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
+                  cd app/helm/stable
+                  for chart in ${chartlists[@]}; do
+                    if [ $chart = castervrtreference ]; then
+                      cd castervrtreference/scripts
+                      bash ./deploy.sh
+                      cd ../../
+                      helm package ./${chart}
+                      helm s3 push --force ./${chart}-*.tgz my-charts
+                    else
+                      #cd app/helm/stable
+                      helm package ./${chart}
+                      helm s3 push --force ./${chart}-*.tgz my-charts
+                    fi
+                  done
+      TimeoutInMinutes: 30

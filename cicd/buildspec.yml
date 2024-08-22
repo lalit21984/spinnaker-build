@@ -1,0 +1,31 @@
+  version: 0.2
+  phases:
+    install:
+      runtime-versions:
+          python: 3.7
+    pre_build:
+      commands:
+        - pip install --upgrade pip
+        - pip install --upgrade awscli aws-sam-cli 
+        - yum install -y cfn-lint
+        - yum install -y yq
+
+    build:
+      commands:
+        - echo "Running cfn-lint on $TEMPLATE_PATH"
+        - cfn-lint $TEMPLATE_PATH
+        - export COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+        - export DESCRIPTION=$(yq e '.Description' $TEMPLATE_PATH)
+        - export NEW_DESCRIPTION="$DESCRIPTION - [$COMMIT_HASH]"
+        - yq e -i '.Description = strenv(NEW_DESCRIPTION)' $TEMPLATE_PATH
+        - Description: Sample Template for app Simple-CloudFormation
+        # - echo "Performing SAM build/package"
+        # - sam build -t $TEMPLATE_PATH
+        # - >
+        # sam package
+        # --s3-bucket ${TEMPLATE_BUCKET}
+        # --kms-key-id ${KMS_ARN}
+        # --output-template-file $TEMPLATE_PATH
+  artifacts:
+    files:
+      - '**/*'

@@ -1,0 +1,15 @@
+{
+  "Parameters": {
+    "pS3Bucket": "ab-app1-cluster-spinnaker-us-east-1",
+    "pHelmChartRepoName": "abc",
+    "pChartVersion": "0.1.0"
+  },
+  "Tags" : {
+    "pact:purpose": "Application Purpose",
+    "pact:customer-data": "true",
+    "pact:dataclass": "high-conf",
+    "pact:team-owner": "abc@abc.com",
+    "pact:launched-by": "abc@abc.com",
+    "pact:resource-custodian": "abc@abc.com"
+  }
+}
